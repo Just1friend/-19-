@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>致最特别的你 生日快乐</title>
+    <style>
+        /* --- 基础设置 --- */
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.15);
+            --glass-border: rgba(255, 255, 255, 0.3);
+            --text-glow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020202; /* 纯黑背景以突出烟花 */
+            font-family: 'Georgia', 'Times New Roman', 'Songti SC', serif; /* 使用衬线体显得优雅 */
+            color: #fff;
+        }
+
+        /* --- 画布层 (烟花) --- */
+        #canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* --- 祝福语浮动层 --- */
+        #messages-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none; /* 让鼠标事件穿透 */
+            overflow: hidden;
+        }
+
+        .floating-msg {
+            position: absolute;
+            bottom: -50px; /* 从屏幕下方开始 */
+            background: var(--glass-bg);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: 1px solid var(--glass-border);
+            padding: 10px 20px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 1rem;
+            white-space: nowrap;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            opacity: 0;
+            animation: floatUpFade 8s linear forwards;
+        }
+
+        /* 浮动动画：从下往上，同时淡入淡出 */
+        @keyframes floatUpFade {
+            0% {
+                bottom: -50px;
+                opacity: 0;
+                transform: translateX(0);
+            }
+            10% {
+                opacity: 0.9;
+            }
+            90% {
+                opacity: 0.8;
+            }
+            100% {
+                bottom: 110%;
+                opacity: 0;
+                transform: translateX(var(--drift)); /* 稍微左右飘动 */
+            }
+        }
+
+        /* --- 启动界面 --- */
+        #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 1.5s ease;
+        }
+
+        .main-title {
+            font-size: 3rem;
+            font-weight: normal;
+            letter-spacing: 5px;
+            margin-bottom: 2rem;
+            background: linear-gradient(to right, #fff, #e0c3fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: textShine 3s infinite linear;
+        }
+
+        @keyframes textShine {
+            0% { filter: brightness(1); }
+            50% { filter: brightness(1.3); }
+            100% { filter: brightness(1); }
+        }
+
+        .start-btn {
+            padding: 15px 50px;
+            font-size: 1.2rem;
+            font-family: inherit;
+            color: #fff;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.5s ease;
+            letter-spacing: 2px;
+            border-radius: 50px;
+        }
+
+        .start-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #fff;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 烟花画布 -->
+    <canvas id="canvas"></canvas>
+
+    <!-- 祝福语容器 -->
+    <div id="messages-container"></div>
+
+    <!-- 启动层 -->
+    <div id="start-overlay">
+        <h1 class="main-title">钟雨婷 Happy Birthday</h1>
+        <button class="start-btn" onclick="startExperience()">开启 · 这一刻</button>
+    </div>
+
+    <script>
+        // --- 配置项 ---
+        const config = {
+            particleCount: 150, // 每次爆炸的粒子数，越多越壮观但耗性能
+            gravity: 0.05,      // 重力
+            friction: 0.96,     // 空气阻力
+            autoLaunch: 60,     // 自动发射频率 (帧数)
+        };
+
+        const messages = [
+            "你就是个宝宝",
+            "寒假好冷，多穿衣服",
+            "生日快乐，我的宝贝",
+            "好好吃饭，小宝宝",
+            "累了就歇一歇吧",
+            "有我给你祝福哦",
+            "我想你了",
+            "愿你的生活常温暖，日子总是温柔又闪光",
+            "不要害怕你的19岁，有我们陪着你",
+            "多喝热水，按时吃药",
+            "遇见你，是所有故事的开始",
+            "希望你的疾病快点痊愈，相信自己",
+            "我想和你，一起虚度短的沉默，长的无意义"
+        ];
+
+        // --- 1. 高级烟花引擎 ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let w, h;
+        let fireworks = [];
+        let particles = [];
+        let timerTotal = 0;
+        let animationId;
+
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 随机辅助函数
+        const random = (min, max) => Math.random() * (max - min) + min;
+
+        class Firework {
+            constructor(tx, ty) {
+                this.x = w / 2; // 从底部中间发射
+                this.y = h;
+                this.tx = tx;   // 目标X
+                this.ty = ty;   // 目标Y
+                this.distanceToTarget = Math.sqrt(Math.pow(tx - w/2, 2) + Math.pow(ty - h, 2));
+                this.distanceTraveled = 0;
+                this.coordinates = [];
+                this.coordinateCount = 3;
+                while (this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+                this.angle = Math.atan2(ty - h, tx - w/2);
+                this.speed = 2;
+                this.acceleration = 1.03;
+                this.brightness = random(50, 70);
+                // 随机色相，偏向金色、粉色、紫色系
+                this.hue = random(30, 330); 
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+                
+                this.speed *= this.acceleration;
+                
+                const vx = Math.cos(this.angle) * this.speed;
+                const vy = Math.sin(this.angle) * this.speed;
+                
+                this.distanceTraveled = Math.sqrt(Math.pow(this.x - w/2 + vx, 2) + Math.pow(this.y - h + vy, 2));
+
+                if (this.distanceTraveled >= this.distanceToTarget) {
+                    createParticles(this.tx, this.ty, this.hue);
+                    fireworks.splice(index, 1);
+                } else {
+                    this.x += vx;
+                    this.y += vy;
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                ctx.lineTo(this.x, this.y);
+                ctx.strokeStyle = `hsl(${this.hue}, 100%, ${this.brightness}%)`;
+                ctx.stroke();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, hue) {
+                this.x = x;
+                this.y = y;
+                this.coordinates = [];
+                this.coordinateCount = 5;
+                while (this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+                // 爆炸角度
+                this.angle = random(0, Math.PI * 2);
+                // 爆炸速度
+                this.speed = random(1, 12);
+                this.friction = config.friction;
+                this.gravity = config.gravity;
+                this.hue = random(hue - 20, hue + 20);
+                this.brightness = random(50, 80);
+                this.alpha = 1;
+                this.decay = random(0.01, 0.025); // 消失速度
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+                
+                this.speed *= this.friction;
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed + this.gravity;
+                
+                this.alpha -= this.decay;
+
+                if (this.alpha <= this.decay) {
+                    particles.splice(index, 1);
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                ctx.lineTo(this.x, this.y);
+                ctx.strokeStyle = `hsla(${this.hue}, 100%, ${this.brightness}%, ${this.alpha})`;
+                // 增加辉光效果
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = `hsla(${this.hue}, 100%, ${this.brightness}%, ${this.alpha})`;
+                ctx.stroke();
+                ctx.shadowBlur = 0; // 重置以防影响性能
+            }
+        }
+
+        function createParticles(x, y, hue) {
+            let actualCount = config.particleCount; // 可以根据需要调整
+            while (actualCount--) {
+                particles.push(new Particle(x, y, hue));
+            }
+        }
+
+        function loop() {
+            animationId = requestAnimationFrame(loop);
+
+            // 拖尾效果：使用半透明黑色覆盖上一帧
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // 0.2的透明度决定拖尾长度
+            ctx.fillRect(0, 0, w, h);
+            
+            ctx.globalCompositeOperation = 'lighter'; // 混合模式，让烟花重叠部分更亮
+
+            // 绘制和更新烟花
+            let i = fireworks.length;
+            while (i--) {
+                fireworks[i].draw();
+                fireworks[i].update(i);
+            }
+
+            // 绘制和更新粒子
+            let k = particles.length;
+            while (k--) {
+                particles[k].draw();
+                particles[k].update(k);
+            }
+
+            // 自动发射逻辑
+            if (timerTotal >= config.autoLaunch) {
+                // 随机位置发射
+                fireworks.push(new Firework(random(w * 0.2, w * 0.8), random(h * 0.1, h * 0.4)));
+                timerTotal = 0;
+            } else {
+                timerTotal++;
+            }
+        }
+
+        // --- 2. 祝福语逻辑 ---
+        const msgContainer = document.getElementById('messages-container');
+        let msgInterval;
+
+        function spawnMessage() {
+            const msg = document.createElement('div');
+            msg.classList.add('floating-msg');
+            
+            // 随机选取句子
+            const text = messages[Math.floor(Math.random() * messages.length)];
+            msg.innerText = text;
+
+            // 随机水平位置 (10% - 80%)
+            const leftPos = random(10, 80);
+            msg.style.left = leftPos + '%';
+
+            // 随机飘动方向 (CSS变量)
+            const drift = random(-50, 50) + 'px';
+            msg.style.setProperty('--drift', drift);
+
+            // 随机字体大小微调，增加层次感
+            const fontSize = random(0.9, 1.3);
+            msg.style.fontSize = fontSize + 'rem';
+
+            msgContainer.appendChild(msg);
+
+            // 动画结束后清理DOM，防止内存泄漏
+            setTimeout(() => {
+                msg.remove();
+            }, 8000); // 对应CSS动画时长
+        }
+
+        // --- 3. 交互控制 ---
+        function startExperience() {
+            const overlay = document.getElementById('start-overlay');
+            
+            // 淡出遮罩层
+            overlay.style.opacity = 0;
+            setTimeout(() => {
+                overlay.style.display = 'none';
+            }, 1500);
+
+            // 启动烟花
+            loop();
+
+            // 启动祝福语弹窗 (每隔 1.5秒 弹出一个)
+            spawnMessage(); // 立即弹出一个
+            msgInterval = setInterval(spawnMessage, 1800);
+
+            // 初始几发大烟花
+            setTimeout(() => fireworks.push(new Firework(w*0.3, h*0.3)), 500);
+            setTimeout(() => fireworks.push(new Firework(w*0.7, h*0.2)), 1000);
+            setTimeout(() => fireworks.push(new Firework(w*0.5, h*0.25)), 1500);
+        }
+
+    </script>
+</body>
+</html>
